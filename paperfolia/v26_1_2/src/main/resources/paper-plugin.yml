@@ -1,0 +1,7 @@
+name: "ChatManagePluginv2"
+version: "${version}"
+main: com.mc1510ty.ChatManagePluginv2.paperfolia.v26_1_2.Main
+author: "1510ty"
+description: "日本のサーバー向けのチャット管理プラグイン"
+api-version: "26.1.2"
+folia-supported: true
