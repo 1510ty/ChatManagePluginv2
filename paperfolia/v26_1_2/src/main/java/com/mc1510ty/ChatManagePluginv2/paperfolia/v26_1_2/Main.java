@@ -12,7 +12,8 @@ import redis.clients.jedis.UnifiedJedis;
 public class Main extends JavaPlugin implements Listener {
 
     private boolean useRedis;
-    private UnifiedJedis jedis;
+    private UnifiedJedis pubJedis; // 送信用
+    private UnifiedJedis subJedis; // 受信用
     private String redisChannel;
 
     @Override
@@ -24,21 +25,23 @@ public class Main extends JavaPlugin implements Listener {
         if (useRedis) {
             String host = getConfig().getString("redis.host", "localhost");
             int port = getConfig().getInt("redis.port", 6379);
-            // ここで代入！これだけで接続準備完了
-            this.jedis = new redis.clients.jedis.UnifiedJedis(new redis.clients.jedis.HostAndPort(host, port));
-            startSubscriber();
-            getLogger().info("Redis Mode: ON");
-        }
+            redis.clients.jedis.HostAndPort address = new redis.clients.jedis.HostAndPort(host, port);
 
+            // インスタンスを2つ作る（これで土管が2本になる）
+            this.pubJedis = new UnifiedJedis(address);
+            this.subJedis = new UnifiedJedis(address);
+
+            startSubscriber();
+            getLogger().info("Redis Mode: ON (Two-way Connection Established)");
+        }
 
         getServer().getPluginManager().registerEvents(this, this);
     }
 
     @Override
     public void onDisable() {
-        if (jedis != null) {
-            jedis.close();
-        }
+        if (pubJedis != null) pubJedis.close();
+        if (subJedis != null) subJedis.close();
     }
 
 
@@ -73,8 +76,9 @@ public class Main extends JavaPlugin implements Listener {
 
         // 以降、Redis送信 or broadcast
         if (useRedis) {
-            getServer().getScheduler().runTaskAsynchronously(this, () -> {
-                jedis.publish(redisChannel, e.getPlayer().getName() + "::" + displayString);
+            getServer().getGlobalRegionScheduler().run(this, (task) -> {
+                // 送信用インスタンス（pubJedis）を使う
+                pubJedis.publish(redisChannel, e.getPlayer().getName() + "::" + displayString);
             });
             e.setCancelled(true);
         } else {
@@ -96,21 +100,31 @@ public class Main extends JavaPlugin implements Listener {
                         String senderName = data[0];
                         String content = data[1];
 
-                        getServer().getScheduler().runTask(Main.this, () -> {
-                            // バニラ風の Component を組み立て
+                        getServer().getGlobalRegionScheduler().execute(Main.this, () -> {
+                            // 1. まずは共通のComponentを作成
                             Component vanillaStyle = Component.text()
                                     .append(Component.text("<" + senderName + "> "))
                                     .append(Component.text(content))
                                     .build();
 
-                            getServer().broadcast(vanillaStyle);
+                            // 2. 全プレイヤーに対してループ
+                            for (org.bukkit.entity.Player player : getServer().getOnlinePlayers()) {
+                                // 3. 各プレイヤー個別のスケジューラーにタスクを投げる
+                                player.getScheduler().execute(Main.this, () -> {
+                                    // そのプレイヤーが属するリージョンのスレッドで安全に送信
+                                    player.sendMessage(vanillaStyle);
+                                }, null, 0); // null = 退席時のコールバックなし, 0 = 遅延なし
+                            }
+
+                            // コンソールにも出しておくと安心
+                            getServer().getConsoleSender().sendMessage(vanillaStyle);
                         });
                     }
                 };
 
                 // ここで待機状態に入る（無限ループになるので必ず別スレッドで！）
                 // UnifiedJedisから中身のコネクションを借りてsubscribe
-                jedis.subscribe(pubSub, redisChannel);
+                subJedis.subscribe(pubSub, redisChannel);
 
             } catch (Exception e) {
                 getLogger().severe("Redis Subscriber でエラーが発生しました: " + e.getMessage());
