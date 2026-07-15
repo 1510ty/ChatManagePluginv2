@@ -30,12 +30,14 @@ public class Main extends JavaPlugin implements Listener {
     private UnifiedJedis pubJedis; // 送信用
     private UnifiedJedis subJedis; // 受信用
     private String redisChannel;
+    private boolean enableromazitohiragana;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         this.useRedis = getConfig().getBoolean("redis.enable", false);
         this.redisChannel = getConfig().getString("redis.channel", "chat_relay");
+        this.enableromazitohiragana = getConfig().getBoolean("romazitohiragana.enable", false);
 
         if (useRedis) {
             String host = getConfig().getString("redis.host", "localhost");
@@ -64,17 +66,19 @@ public class Main extends JavaPlugin implements Listener {
     public void onPlayerChat(AsyncChatEvent e) {
         String original = PlainTextComponentSerializer.plainText().serialize(e.message());
 
+
         // 1. かな変換を試みる（日本語や大文字があればスキップ）
         String kanaResult = original;
         boolean isConverted = false;
 
-        if (!Henkan.containsJapanese(original) && !Henkan.containsUpperCase(original)) {
+        if (enableromazitohiragana && !Henkan.containsJapanese(original) && !Henkan.containsUpperCase(original)) {
             kanaResult = Henkan.romajikarakana(original);
             // 元の文と変わっていれば「変換された」とみなす
             if (!original.equals(kanaResult)) {
                 isConverted = true;
             }
         }
+
 
         // 2. 常にフィルターを適用
         String finalContent = Henkan.applyFilters(kanaResult);

@@ -1,3 +1,5 @@
+romazitohiragana:
+  enable: true
 redis:
   enable: true
   host: localhost
